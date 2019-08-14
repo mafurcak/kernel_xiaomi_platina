@@ -4,6 +4,7 @@
  * Copyright (C) 2017-2018 Synaptics Incorporated. All rights reserved.
  *
  * Copyright (C) 2017-2018 Scott Lin <scott.lin@tw.synaptics.com>
+ * Copyright (C) 2018 XiaoMi, Inc.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -47,7 +48,7 @@
 
 #define KEEP_DRIVER_ON_ERROR
 
-/*#define FORCE_RUN_APPLICATION_FIRMWARE*/
+#define FORCE_RUN_APPLICATION_FIRMWARE
 
 #define NOTIFIER_PRIORITY 2
 
@@ -178,7 +179,6 @@ SHOW_STORE_PROTOTYPE(syna_tcm, stimulus_fingers)
 SHOW_STORE_PROTOTYPE(syna_tcm, grip_suppression_enabled)
 SHOW_STORE_PROTOTYPE(syna_tcm, enable_thick_glove)
 SHOW_STORE_PROTOTYPE(syna_tcm, enable_glove)
-SHOW_STORE_PROTOTYPE(syna_tcm, grip_enable)
 
 static struct device_attribute *attrs[] = {
 	ATTRIFY(info),
@@ -201,7 +201,6 @@ static struct device_attribute *dynamic_config_attrs[] = {
 	ATTRIFY(grip_suppression_enabled),
 	ATTRIFY(enable_thick_glove),
 	ATTRIFY(enable_glove),
-	ATTRIFY(grip_enable),
 };
 
 static ssize_t syna_tcm_sysfs_panel_color_show(struct device *dev,
@@ -510,8 +509,6 @@ dynamic_config_sysfs(enable_thick_glove, DC_ENABLE_THICK_GLOVE)
 
 dynamic_config_sysfs(enable_glove, DC_ENABLE_GLOVE)
 
-dynamic_config_sysfs(grip_enable, DC_DYNAMIC_GRIP)
-
 int syna_tcm_add_module(struct syna_tcm_module_cb *mod_cb, bool insert)
 {
 	struct syna_tcm_module_handler *mod_handler;
@@ -814,8 +811,6 @@ static void syna_tcm_dispatch_message(struct syna_tcm_hcd *tcm_hcd)
 			tcm_hcd->host_download_mode = true;
 			return;
 		}
-		LOGE(tcm_hcd->pdev->dev.parent,
-						"%s:No force run applications modet\n", __func__);
 
 #ifdef FORCE_RUN_APPLICATION_FIRMWARE
 		if (tcm_hcd->id_info.mode != MODE_APPLICATION &&
@@ -2726,6 +2721,7 @@ static int syna_tcm_reset(struct syna_tcm_hcd *tcm_hcd, bool hw, bool update_wd)
 				NULL,
 				bdata->reset_delay_ms);
 
+		retval = 0;
 		if (retval < 0 && !tcm_hcd->host_download_mode) {
 			LOGE(tcm_hcd->pdev->dev.parent,
 					"Failed to write command %s\n",
@@ -2759,9 +2755,7 @@ static int syna_tcm_reset(struct syna_tcm_hcd *tcm_hcd, bool hw, bool update_wd)
 
 	if (tcm_hcd->id_info.mode == MODE_APPLICATION)
 		goto get_features;
-	LOGE(tcm_hcd->pdev->dev.parent,
-			"%s: Write command CMD_RUN_APPLICATION_FIRMWARE",
-			__func__);
+
 	retval = tcm_hcd->write_message(tcm_hcd,
 			CMD_RUN_APPLICATION_FIRMWARE,
 			NULL,
@@ -3194,8 +3188,8 @@ static void syna_tcm_resume_work(struct work_struct *work)
 {
 	struct syna_tcm_hcd *tcm_hcd = container_of(work, struct syna_tcm_hcd,	resume_work);
 	int retval;
-	if (tcm_hcd->reflash_okay) {
-		if (tcm_hcd->ts_pinctrl) {
+
+	if (tcm_hcd->ts_pinctrl) {
 		retval = pinctrl_select_state(tcm_hcd->ts_pinctrl,
 				tcm_hcd->pinctrl_state_active);
 		if (retval < 0)
@@ -3206,10 +3200,8 @@ static void syna_tcm_resume_work(struct work_struct *work)
 			LOGE(tcm_hcd->pdev->dev.parent,
 					"%s:select %s pinstate\n",
 					__func__, PINCTRL_STATE_ACTIVE);
-		}
-		if (tcm_hcd->in_suspend)
-			syna_tcm_resume(&tcm_hcd->pdev->dev);
 	}
+	syna_tcm_resume(&tcm_hcd->pdev->dev);
 }
 
 static int syna_tcm_fb_notifier_cb(struct notifier_block *nb,
@@ -3220,7 +3212,6 @@ static int syna_tcm_fb_notifier_cb(struct notifier_block *nb,
 	struct fb_event *evdata = data;
 	struct syna_tcm_hcd *tcm_hcd =
 			container_of(nb, struct syna_tcm_hcd, fb_notifier);
-
 
 	if (evdata && evdata->data && tcm_hcd &&  mdss_panel_is_prim(evdata->info)) {
 		transition = evdata->data;
@@ -3239,7 +3230,7 @@ static int syna_tcm_fb_notifier_cb(struct notifier_block *nb,
 					}
 				} else if (*transition == FB_BLANK_UNBLANK) {
 					if ((tcm_hcd->gesture_enabled || !tcm_hcd->gesture_disabled_when_resume)
-						&& tcm_hcd->gesture_enabled_when_resume && tcm_hcd->reflash_okay)
+						&& tcm_hcd->gesture_enabled_when_resume)
 						retval = syna_tcm_resume(&tcm_hcd->pdev->dev);
 				}
 #endif
@@ -3328,70 +3319,6 @@ err_pinctrl_get:
 	return retval;
 }
 
-static int grip_area_open(struct inode *inode, struct file *file)
-{
-	file->private_data = inode->i_private;
-	return 0;
-}
-
-static ssize_t grip_area_write(struct file *file, const char __user *buf, size_t size, loff_t *ppos)
-{
-	char *cmd = kzalloc(size + 1, GFP_KERNEL);
-	int ret = -EIO;
-	int input = 0;
-	char tmp[2];
-	char result[2];
-
-	if (!tcm_hcd || !cmd)
-		return ret;
-
-	if (tcm_hcd->in_suspend) {
-		dev_err(tcm_hcd->pdev->dev.parent, "tp is suspended, no need to set\n");
-		return ret;
-	}
-
-	if (copy_from_user(cmd, buf, size)) {
-		goto out;
-	}
-
-	cmd[size] = '\0';
-	tmp[1] = '\0';
-	result[1] = '\0';
-	if (sscanf(cmd, "%d", &input) != 1)
-		goto out;
-	if (input == 90 || input == 270)
-		tmp[0] = '1';
-	else
-		tmp[0] = '0';
-
-	ret = syna_tcm_sysfs_grip_enable_store(NULL, NULL, tmp, 2);
-	ret = syna_tcm_sysfs_grip_enable_show(NULL, NULL, result);
-	if (strncmp(tmp, result, 1)) {
-		dev_err(tcm_hcd->pdev->dev.parent, "error grip area set:%s, actuly:%s\n", tmp, result);
-		ret = -EIO;
-	} else {
-		dev_info(tcm_hcd->pdev->dev.parent, "grip area set:%s\n", tmp);
-		ret = size;
-	}
-out:
-	kfree(cmd);
-	cmd = NULL;
-	return ret;
-}
-
-static int grip_area_release(struct inode *inode, struct file *file)
-{
-	file->private_data = NULL;
-	return 0;
-}
-
-static const struct file_operations grip_area_operations = {
-	.owner = THIS_MODULE,
-	.open = grip_area_open,
-	.write = grip_area_write,
-	.release = grip_area_release,
-};
-
 static int syna_tcm_probe(struct platform_device *pdev)
 {
 	int retval;
@@ -3434,9 +3361,10 @@ static int syna_tcm_probe(struct platform_device *pdev)
 	tcm_hcd->get_dynamic_config = syna_tcm_get_dynamic_config;
 	tcm_hcd->set_dynamic_config = syna_tcm_set_dynamic_config;
 	tcm_hcd->get_data_location = syna_tcm_get_data_location;
+
 	tcm_hcd->rd_chunk_size = RD_CHUNK_SIZE;
 	tcm_hcd->wr_chunk_size = WR_CHUNK_SIZE;
-	tcm_hcd->reflash_okay = false;
+
 #ifdef PREDICTIVE_READING
 	tcm_hcd->read_length = MIN_READ_LENGTH;
 #else
@@ -3450,8 +3378,7 @@ static int syna_tcm_probe(struct platform_device *pdev)
 		tcm_hcd->irq = gpio_to_irq(bdata->irq_gpio);
 	else
 		tcm_hcd->irq = bdata->irq_gpio;
-	LOGE(tcm_hcd->pdev->dev.parent,
-					"%s: Synaptics tp driver probe startsss\n", __func__);
+
 	mutex_init(&tcm_hcd->extif_mutex);
 	mutex_init(&tcm_hcd->reset_mutex);
 	mutex_init(&tcm_hcd->irq_en_mutex);
@@ -3575,6 +3502,15 @@ static int syna_tcm_probe(struct platform_device *pdev)
 			goto err_sysfs_create_dynamic_config_file;
 		}
 	}
+/*
+ * add syna_tp_debug interface for power dissipation
+ */
+	tcm_hcd->debugfs = debugfs_create_dir("tp_debug", NULL);
+	if (tcm_hcd->debugfs) {
+		debugfs_create_file("switch_state", 0660,
+				tcm_hcd->debugfs, tcm_hcd, &tpdbg_operations);
+	}
+	LOGE(tcm_hcd->pdev->dev.parent, "Success create syna_tp_debug file\n");
 #ifdef CONFIG_FB
 	tcm_hcd->fb_notifier.notifier_call = syna_tcm_fb_notifier_cb;
 	retval = fb_register_client(&tcm_hcd->fb_notifier);
@@ -3617,7 +3553,6 @@ static int syna_tcm_probe(struct platform_device *pdev)
 				"Failed to enable interrupt\n");
 		goto err_enable_irq;
 	}
-#if 0
 	retval = tcm_hcd->reset(tcm_hcd, false, false);
 	if (retval < 0) {
 		LOGE(tcm_hcd->pdev->dev.parent,
@@ -3633,7 +3568,7 @@ static int syna_tcm_probe(struct platform_device *pdev)
 		tcm_hcd->init_okay = true;
 		tcm_hcd->update_watchdog(tcm_hcd, true);
 	}
-#endif
+
 	retval = sysfs_create_file(&pdev->dev.parent->kobj, &dev_attr_panel_color.attr);
 
 	if (retval < 0) {
@@ -3660,19 +3595,10 @@ static int syna_tcm_probe(struct platform_device *pdev)
 	mod_pool.tcm_hcd = tcm_hcd;
 	mod_pool.queue_work = true;
 	queue_work(mod_pool.workqueue, &mod_pool.work);
- /* add syna_tp_debug interface for power dissipation
- */
-	tcm_hcd->debugfs = debugfs_create_dir("tp_debug", NULL);
-	if (tcm_hcd->debugfs) {
-		debugfs_create_file("switch_state", 0660,
-				tcm_hcd->debugfs, tcm_hcd, &tpdbg_operations);
-		debugfs_create_file("grip_area", 0660, tcm_hcd->debugfs, tcm_hcd, &grip_area_operations);
-	}
 	return 0;
-#if 0
+
 #ifndef KEEP_DRIVER_ON_ERROR
 err_reset:
-#endif
 #endif
 err_enable_irq:
 	cancel_delayed_work_sync(&tcm_hcd->polling_work);

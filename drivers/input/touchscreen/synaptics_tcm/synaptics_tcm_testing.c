@@ -4,6 +4,7 @@
  * Copyright (C) 2017-2018 Synaptics Incorporated. All rights reserved.
  *
  * Copyright (C) 2017-2018 Scott Lin <scott.lin@tw.synaptics.com>
+ * Copyright (C) 2018 XiaoMi, Inc.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -865,7 +866,7 @@ static int testing_dynamic_range(void)
 					data < drt_lo_limits[row][col]) {
 				testing_hcd->result = false;
 				dev_info(tcm_hcd->pdev->dev.parent, "row:%d col:%d data:%d outof range\n",
-						row, col, data);
+							row, col, data);
 				break;
 			}
 			idx++;

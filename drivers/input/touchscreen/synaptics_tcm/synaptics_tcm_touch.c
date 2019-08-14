@@ -4,6 +4,7 @@
  * Copyright (C) 2017-2018 Synaptics Incorporated. All rights reserved.
  *
  * Copyright (C) 2017-2018 Scott Lin <scott.lin@tw.synaptics.com>
+ * Copyright (C) 2018 XiaoMi, Inc.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -121,7 +122,6 @@ struct syna_tcm_work_mode_switch {
 	struct work_struct switch_mode_work;
 };
 struct touch_hcd {
-	int dbclick_count;
 	bool irq_wake;
 	bool report_touch;
 	bool suspend_touch;
@@ -622,9 +622,6 @@ static void touch_report(void)
 	object_data = touch_hcd->touch_data.object_data;
 #ifdef WAKEUP_GESTURE
 	if (touch_data->gesture_double_tap && tcm_hcd->in_suspend) {
-		touch_hcd->dbclick_count++;
-		LOGE(tcm_hcd->pdev->dev.parent,
-						"syna wakeup with dbclick and count ++\n");
 		input_report_key(touch_hcd->input_dev, KEY_WAKEUP, 1);
 		input_sync(touch_hcd->input_dev);
 		input_report_key(touch_hcd->input_dev, KEY_WAKEUP, 0);
@@ -1130,7 +1127,6 @@ static int touch_init(struct syna_tcm_hcd *tcm_hcd)
 				"Failed to set up input reporting\n");
 		goto err_set_input_reporting;
 	}
-	touch_hcd->dbclick_count = 0;
 	tcm_hcd->report_touch = touch_report;
 
 	return 0;

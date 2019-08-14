@@ -4,6 +4,7 @@
  * Copyright (C) 2017-2018 Synaptics Incorporated. All rights reserved.
  *
  * Copyright (C) 2017-2018 Scott Lin <scott.lin@tw.synaptics.com>
+ * Copyright (C) 2018 XiaoMi, Inc.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -186,7 +187,7 @@ enum firmware_mode {
 	FW_MODE_APPLICATION = 1,
 	FW_MODE_PRODUCTION_TEST = 2,
 };
-#define DC_DYNAMIC_GRIP 208
+
 enum dynamic_config_id {
 	DC_UNKNOWN = 0x00,
 	DC_NO_DOZE,
@@ -391,7 +392,6 @@ struct syna_tcm_hcd {
 	atomic_t host_downloading;
 	wait_queue_head_t hdl_wq;
 	int irq;
-	bool reflash_okay;
 	bool init_okay;
 	bool do_polling;
 	bool in_suspend;

@@ -4,6 +4,7 @@
  * Copyright (C) 2017-2018 Synaptics Incorporated. All rights reserved.
  *
  * Copyright (C) 2017-2018 Scott Lin <scott.lin@tw.synaptics.com>
+ * Copyright (C) 2018 XiaoMi, Inc.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -61,7 +62,7 @@
 
 #define FB_READY_WAIT_MS 100
 
-#define FB_READY_TIMEOUT_S 130
+#define FB_READY_TIMEOUT_S 30
 
 #define IMAGE_FILE_MAGIC_VALUE 0x4818472b
 
@@ -959,9 +960,9 @@ static int reflash_get_fw_image(void)
 static enum update_area reflash_compare_id_info(void)
 {
 	enum update_area update_area;
+	unsigned int idx;
 	unsigned int device_fw_id;
 	unsigned int image_fw_id;
-	unsigned int idx;
 	unsigned char *image_config_id;
 	unsigned char *device_config_id;
 	struct app_config_header *header;
@@ -1004,6 +1005,7 @@ static enum update_area reflash_compare_id_info(void)
 
 	image_config_id = header->customer_config_id;
 	device_config_id = tcm_hcd->app_info.customer_config_id;
+
 	for (idx = 0; idx < 16; idx++) {
 		if (image_config_id[idx] != device_config_id[idx]) {
 			LOGN(tcm_hcd->pdev->dev.parent,
@@ -1917,7 +1919,7 @@ static int reflash_do_reflash(void)
 			"End of reflash\n");
 
 	retval = 0;
-	tcm_hcd->reflash_okay = true;
+
 exit:
 	if (reflash_hcd->fw_entry) {
 		release_firmware(reflash_hcd->fw_entry);
@@ -1933,7 +1935,6 @@ exit:
 static void reflash_startup_work(struct work_struct *work)
 {
 	int retval;
-	int idx;
 #ifdef CONFIG_FB
 	unsigned int timeout;
 #endif
@@ -1953,13 +1954,6 @@ static void reflash_startup_work(struct work_struct *work)
 	}
 #endif
 
-	if (tcm_hcd->id_info.mode == MODE_APPLICATION) {
-		retval = tcm_hcd->identify(tcm_hcd, false);
-		if (retval < 0) {
-			LOGE(tcm_hcd->pdev->dev.parent, "%s Failed to do identification\n", __func__);
-		}
-	}
-
 	pm_stay_awake(&tcm_hcd->pdev->dev);
 
 	mutex_lock(&reflash_hcd->reflash_mutex);
@@ -1969,21 +1963,6 @@ static void reflash_startup_work(struct work_struct *work)
 		LOGE(tcm_hcd->pdev->dev.parent,
 				"Failed to do reflash\n");
 	}
-	retval = reflash_read_data(CUSTOM_OTP, false, NULL);
-	if (retval < 0) {
-		LOGE(tcm_hcd->pdev->dev.parent, "Failed to read lockdown data\n");
-	} else {
-		for (idx = 0; idx < LOCKDOWN_SIZE; idx++)
-			tcm_hcd->lockdown[idx] = reflash_hcd->read.buf[idx];
-		pr_info("synaptics %s Lockdown:0x%2x,0x%2x,0x%2x,0x%2x,0x%2x,0x%2x,0x%2x,0x%2x\n", __func__,
-				tcm_hcd->lockdown[0], tcm_hcd->lockdown[1], tcm_hcd->lockdown[2], tcm_hcd->lockdown[3],
-				tcm_hcd->lockdown[4], tcm_hcd->lockdown[5], tcm_hcd->lockdown[6], tcm_hcd->lockdown[7]);
-	}
-
-	LOGE(tcm_hcd->pdev->dev.parent, "%s: Do Hard reset started\n", __func__);
-	retval = tcm_hcd->reset(tcm_hcd, true, true);
-	if (retval < 0)
-		LOGE(tcm_hcd->pdev->dev.parent, "%s: Do Hard reset failed\n", __func__);
 
 	mutex_unlock(&reflash_hcd->reflash_mutex);
 
@@ -2050,6 +2029,7 @@ static int reflash_init(struct syna_tcm_hcd *tcm_hcd)
 {
 	int retval;
 	int idx;
+
 	reflash_hcd = kzalloc(sizeof(*reflash_hcd), GFP_KERNEL);
 	if (!reflash_hcd) {
 		LOGE(tcm_hcd->pdev->dev.parent,
@@ -2076,6 +2056,16 @@ static int reflash_init(struct syna_tcm_hcd *tcm_hcd)
 	INIT_BUFFER(reflash_hcd->resp, false);
 	INIT_BUFFER(reflash_hcd->read, false);
 
+	retval = reflash_read_data(CUSTOM_OTP, true, NULL);
+	if (retval < 0) {
+		LOGE(tcm_hcd->pdev->dev.parent, "Failed to read lockdown data\n");
+	} else {
+		for (idx = 0; idx < LOCKDOWN_SIZE; idx++)
+			tcm_hcd->lockdown[idx] = reflash_hcd->read.buf[idx];
+		pr_info("synaptics %s Lockdown:0x%2x,0x%2x,0x%2x,0x%2x,0x%2x,0x%2x,0x%2x,0x%2x\n", __func__,
+				tcm_hcd->lockdown[0], tcm_hcd->lockdown[1], tcm_hcd->lockdown[2], tcm_hcd->lockdown[3],
+				tcm_hcd->lockdown[4], tcm_hcd->lockdown[5], tcm_hcd->lockdown[6], tcm_hcd->lockdown[7]);
+	}
 #ifdef STARTUP_REFLASH
 	reflash_hcd->workqueue =
 			create_singlethread_workqueue("syna_tcm_reflash");
